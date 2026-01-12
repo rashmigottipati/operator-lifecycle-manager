@@ -7,6 +7,10 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"go.podman.io/image/v5/docker"
+	"go.podman.io/image/v5/docker/reference"
+	"go.podman.io/image/v5/manifest"
+	"go.podman.io/image/v5/types"
 
 	"github.com/operator-framework/api/pkg/operators/v1alpha1"
 
@@ -432,6 +436,37 @@ func (c *GrpcRegistryReconciler) ensureUpdatePod(logger *logrus.Entry, serviceAc
 
 	if source.Update() && len(currentUpdatePods) == 0 {
 		logger.Infof("catalog update required at %s", time.Now().String())
+
+		// Check registry manifest digest before creating pod
+		if len(currentLivePods) > 0 && source.Spec.Image != "" {
+			// Parse image reference
+			imgRef, err := reference.ParseNamed(source.Spec.Image)
+			if err == nil {
+				// Query registry for digest
+				srcRef, err := docker.NewReference(imgRef)
+				if err == nil {
+					imgSrc, err := srcRef.NewImageSource(context.TODO(), &types.SystemContext{})
+					if err == nil {
+						defer imgSrc.Close()
+						imgManifestData, _, err := imgSrc.GetManifest(context.TODO(), nil)
+						if err == nil {
+							imgDigest, err := manifest.Digest(imgManifestData)
+							if err == nil {
+								registryDigest := imgDigest.String()
+								// Compare with current pod's ImageID
+								currentImageID := imageID(currentLivePods[0])
+								if currentImageID != "" && strings.HasSuffix(currentImageID, registryDigest) {
+									logger.Info("registry digest unchanged, skipping update pod creation")
+									source.SetLastUpdateTime()
+									return nil
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+
 		pod, err := c.createUpdatePod(source, serviceAccount, podSecurityConfig)
 		if err != nil {
 			return pkgerrors.Wrapf(err, "creating update catalog source pod")

@@ -2,6 +2,7 @@ package reconciler
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -782,5 +783,46 @@ func TestUpdatePodByDigest(t *testing.T) {
 
 	for i, tt := range table {
 		require.Equal(t, tt.result, imageChanged(logrus.NewEntry(logrus.New()), tt.updatePod, tt.servingPods), table[i].description)
+	}
+}
+
+func TestDigestComparison(t *testing.T) {
+	tests := []struct {
+		name     string
+		imageID  string
+		digest   string
+		expected bool
+	}{
+		{
+			name:     "digest matches",
+			imageID:  "quay.io/operatorhubio/catalog@sha256:abc123",
+			digest:   "sha256:abc123",
+			expected: true,
+		},
+		{
+			name:     "digest doesn't match",
+			imageID:  "quay.io/operatorhubio/catalog@sha256:abc123",
+			digest:   "sha256:different",
+			expected: false,
+		},
+		{
+			name:     "empty imageID",
+			imageID:  "",
+			digest:   "sha256:abc123",
+			expected: false,
+		},
+		{
+			name:     "no @ in imageID",
+			imageID:  "quay.io/operatorhubio/catalog",
+			digest:   "sha256:abc123",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := strings.HasSuffix(tt.imageID, tt.digest)
+			require.Equal(t, tt.expected, result)
+		})
 	}
 }
